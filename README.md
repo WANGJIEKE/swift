@@ -1,5 +1,7 @@
 **NOTICE: This fork is only for creating branches so that I can open pull requests in Apple's Swift repository. Therefore, you may be unable to view all contributions from me in this fork. To view all my contributions to the Swift programming language, use [this link](https://github.com/apple/swift/pulls?q=is%3Apr+author%3AWANGJIEKE). It shows all pull requests created by me in Apple's Swift repository.**
 
+**[Here](https://forums.swift.org/t/bridging-swift-enums-with-associated-values-to-c-conclusion-post/60524) is my conclusion post for the Bridging Swift Enums with Associated Values to C++ project, posted on the Swift forum.**
+
 <img src="https://swift.org/assets/images/swift.svg" alt="Swift logo" height="70" >
 
 # Swift Programming Language
