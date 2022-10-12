@@ -129,17 +129,26 @@ static void addMandatoryDiagnosticOptPipeline(SILPassPipelinePlan &P) {
   P.addNoReturnFolding();
   addDefiniteInitialization(P);
 
-
   //===---
-  // Ownership Optimizations
+  // Begin Ownership Optimizations
   //
 
-  P.addMoveKillsCopyableAddressesChecker();
-  P.addMoveOnlyObjectChecker(); // Check noImplicitCopy and move only
-                                // types.
-  P.addMoveKillsCopyableValuesChecker(); // No uses after _move of copyable
-                                         //   value.
+  // Check noImplicitCopy and move only types for addresses.
+  P.addMoveOnlyAddressChecker();
+  // Check noImplicitCopy and move only types for objects
+  P.addMoveOnlyObjectChecker();
+  // Convert last destroy_value to deinits.
+  P.addMoveOnlyDeinitInsertion();
+  // Lower move only wrapped trivial types.
   P.addTrivialMoveOnlyTypeEliminator();
+  // Check no uses after _move of a value in an address.
+  P.addMoveKillsCopyableAddressesChecker();
+  // No uses after _move of copyable value.
+  P.addMoveKillsCopyableValuesChecker();
+
+  //
+  // End Ownership Optimizations
+  //===---
 
   P.addAddressLowering();
 
@@ -193,7 +202,7 @@ static void addMandatoryDiagnosticOptPipeline(SILPassPipelinePlan &P) {
   P.addPredictableDeadAllocationElimination();
 
   // Now that we have finished performing diagnostics that rely on lexical
-  // scopes, if lexical lifetimes are not enabled, eliminate lexical lfietimes.
+  // scopes, if lexical lifetimes are not enabled, eliminate lexical lifetimes.
   if (Options.LexicalLifetimes != LexicalLifetimesOption::On) {
     P.addLexicalLifetimeEliminator();
   }
@@ -292,7 +301,7 @@ void addSimplifyCFGSILCombinePasses(SILPassPipelinePlan &P) {
   // Jump threading can expose opportunity for silcombine (enum -> is_enum_tag->
   // cond_br).
   P.addSILCombine();
-  // Which can expose opportunity for simplifcfg.
+  // Which can expose opportunity for simplifycfg.
   P.addSimplifyCFG();
 }
 
@@ -629,7 +638,8 @@ static void addHighLevelFunctionPipeline(SILPassPipelinePlan &P) {
   addHighLevelLoopOptPasses(P);
   
   P.addStringOptimization();
-  P.addComputeEffects();
+  P.addComputeEscapeEffects();
+  P.addComputeSideEffects();
 }
 
 // After "high-level" function passes have processed the entire call tree, run
@@ -644,7 +654,8 @@ static void addHighLevelModulePipeline(SILPassPipelinePlan &P) {
   // Do the first stack promotion on high-level SIL before serialization.
   //
   // FIXME: why does StackPromotion need to run in the module pipeline?
-  P.addComputeEffects();
+  P.addComputeEscapeEffects();
+  P.addComputeSideEffects();
   P.addStackPromotion();
 
   P.addGlobalOpt();
@@ -685,7 +696,8 @@ static void addClosureSpecializePassPipeline(SILPassPipelinePlan &P) {
   
   // ComputeEffects should be done at the end of a function-pipeline. The next
   // pass (GlobalOpt) is a module pass, so this is the end of a function-pipeline.
-  P.addComputeEffects();
+  P.addComputeEscapeEffects();
+  P.addComputeSideEffects();
 
   // Hoist globals out of loops.
   // Global-init functions should not be inlined GlobalOpt is done.
@@ -716,7 +728,8 @@ static void addClosureSpecializePassPipeline(SILPassPipelinePlan &P) {
   // passes can expose more inlining opportunities.
   addSimplifyCFGSILCombinePasses(P);
 
-  P.addComputeEffects();
+  P.addComputeEscapeEffects();
+  P.addComputeSideEffects();
 
   // We do this late since it is a pass like the inline caches that we only want
   // to run once very late. Make sure to run at least one round of the ARC
@@ -737,7 +750,8 @@ static void addLowLevelPassPipeline(SILPassPipelinePlan &P) {
 
   // We've done a lot of optimizations on this function, attempt to FSO.
   P.addFunctionSignatureOpts();
-  P.addComputeEffects();
+  P.addComputeEscapeEffects();
+  P.addComputeSideEffects();
 }
 
 static void addLateLoopOptPassPipeline(SILPassPipelinePlan &P) {
@@ -766,7 +780,8 @@ static void addLateLoopOptPassPipeline(SILPassPipelinePlan &P) {
 
   // Sometimes stack promotion can catch cases only at this late stage of the
   // pipeline, after FunctionSignatureOpts.
-  P.addComputeEffects();
+  P.addComputeEscapeEffects();
+  P.addComputeSideEffects();
   P.addStackPromotion();
 
   // Optimize overflow checks.
@@ -810,6 +825,9 @@ static void addLastChanceOptPassPipeline(SILPassPipelinePlan &P) {
 
   // Emits remarks on all functions with @_assemblyVision attribute.
   P.addAssemblyVisionRemarkGenerator();
+
+  // In optimized builds, do the inter-procedural analysis in a module pass.
+  P.addStackProtection();
 
   // FIXME: rdar://72935649 (Miscompile on combining PruneVTables with WMO)
   // P.addPruneVTables();
@@ -982,6 +1000,9 @@ SILPassPipelinePlan::getOnonePassPipeline(const SILOptions &Options) {
   if (P.getOptions().AssumeSingleThreaded) {
     P.addAssumeSingleThreaded();
   }
+
+  // In Onone builds, do a function-local analysis in a function pass.
+  P.addFunctionStackProtection();
 
   // Has only an effect if the -sil-based-debuginfo option is specified.
   P.addSILDebugInfoGenerator();

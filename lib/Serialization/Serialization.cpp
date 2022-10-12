@@ -1337,7 +1337,7 @@ static uint8_t getRawStableRequirementKind(RequirementKind kind) {
     return GenericRequirementKind::KIND;
 
   switch (kind) {
-  CASE(SameCount)
+  CASE(SameShape)
   CASE(Conformance)
   CASE(Superclass)
   CASE(SameType)
@@ -1787,6 +1787,9 @@ static bool shouldSerializeMember(Decl *D) {
     if (D->getASTContext().LangOpts.AllowModuleWithCompilerErrors)
       return false;
     llvm_unreachable("should never need to reserialize a member placeholder");
+
+  case DeclKind::BuiltinTuple:
+    llvm_unreachable("BuiltinTupleDecl should not show up here");
 
   case DeclKind::IfConfig:
   case DeclKind::PoundDiagnostic:
@@ -2711,16 +2714,22 @@ class Serializer::DeclSerializer : public DeclVisitor<DeclSerializer> {
         pieces.push_back(S.addDeclBaseNameRef(spi));
       }
 
+      for (auto ty : attr->getTypeErasedParams()) {
+        pieces.push_back(S.addTypeRef(ty));
+      }
+
       auto numSPIGroups = attr->getSPIGroups().size();
-      assert(pieces.size() == numArgs + numSPIGroups ||
-             pieces.size() == (numArgs - 1 + numSPIGroups));
+      auto numTypeErasedParams = attr->getTypeErasedParams().size();
+      assert(pieces.size() == numArgs + numSPIGroups + numTypeErasedParams ||
+             pieces.size() == (numArgs - 1 + numSPIGroups + numTypeErasedParams));
       auto numAvailabilityAttrs = attr->getAvailableAttrs().size();
       SpecializeDeclAttrLayout::emitRecord(
           S.Out, S.ScratchRecord, abbrCode, (unsigned)attr->isExported(),
           (unsigned)attr->getSpecializationKind(),
           S.addGenericSignatureRef(attr->getSpecializedSignature()),
           S.addDeclRef(targetFunDecl), numArgs, numSPIGroups,
-          numAvailabilityAttrs, pieces);
+          numAvailabilityAttrs, numTypeErasedParams,
+          pieces);
       for (auto availAttr : attr->getAvailableAttrs()) {
         writeDeclAttribute(D, availAttr);
       }
@@ -4272,6 +4281,10 @@ public:
 
   void visitMissingMemberDecl(const MissingMemberDecl *) {
     llvm_unreachable("member placeholders shouldn't be serialized");
+  }
+
+  void visitBuiltinTupleDecl(const BuiltinTupleDecl *) {
+    llvm_unreachable("BuiltinTupleDecl are not serialized");
   }
 };
 

@@ -2,18 +2,25 @@ set(library_name "swiftCompatibility56")
 
 include_directories("include/" "${SWIFT_STDLIB_SOURCE_DIR}")
 
+add_compile_definitions(SWIFT_COMPATIBILITY56)
 add_swift_target_library("${library_name}" STATIC
   Overrides.cpp
   Concurrency/Task.cpp
+  Concurrency/TaskLocal.cpp
+  Concurrency/TaskStatus.cpp
   Concurrency/Error.cpp
   Concurrency/Actor.cpp
   Concurrency/AsyncLet.cpp
+  Concurrency/ThreadSanitizer.cpp
+  Concurrency/TaskAlloc.cpp
+  Concurrency/MutexPThread.cpp
+  Runtime/Exclusivity.cpp
 
   TARGET_SDKS ${SWIFT_DARWIN_PLATFORMS}
 
-  C_COMPILE_FLAGS ${CXX_COMPILE_FLAGS}
+  C_COMPILE_FLAGS ${CXX_COMPILE_FLAGS} "-D__STDC_WANT_LIB_EXT1__=1"
   LINK_FLAGS ${CXX_LINK_FLAGS}
-  INCORPORATE_OBJECT_LIBRARIES swiftThreading
+  INCORPORATE_OBJECT_LIBRARIES swiftCompatibilityThreading
   SWIFT_COMPILE_FLAGS ${SWIFT_STANDARD_LIBRARY_SWIFT_FLAGS}
   DEPLOYMENT_VERSION_OSX ${COMPATIBILITY_MINIMUM_DEPLOYMENT_VERSION_OSX}
   DEPLOYMENT_VERSION_IOS ${COMPATIBILITY_MINIMUM_DEPLOYMENT_VERSION_IOS}

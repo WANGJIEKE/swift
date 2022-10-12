@@ -33,6 +33,7 @@ add_swift_host_library(swiftAST STATIC
   Availability.cpp
   AvailabilitySpec.cpp
   Builtins.cpp
+  CASTBridging.cpp
   CaptureInfo.cpp
   ClangSwiftTypeCorrespondence.cpp
   ClangTypeConverter.cpp
@@ -137,6 +138,7 @@ if(NOT SWIFT_BUILD_ONLY_SYNTAXPARSERLIB)
     clangFormat
     clangToolingCore
     clangFrontendTool
+    clangDependencyScanning
     clangFrontend
     clangDriver
     clangSerialization
@@ -176,5 +178,6 @@ endif()
 # headers.
 # For more information see the comment at the top of lib/CMakeLists.txt.
 add_dependencies(swiftAST intrinsics_gen clang-tablegen-targets)
+add_dependencies(swiftAST swift-ast-generated-headers)
 
 set_swift_llvm_is_available(swiftAST)

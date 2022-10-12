@@ -3527,6 +3527,51 @@ public:
   }
 };
 
+/// A pack expansion expression is a pattern expression followed by
+/// the expansion operator '...'. The pattern expression contains
+/// references to parameter packs of length N, and the expansion
+/// operator will repeat the pattern N times.
+///
+/// Pack expansion expressions are permitted in expression contexts
+/// that naturally accept a comma-separated list of values, including
+/// call argument lists, the elements of a tuple value, and the source
+/// of a for-in loop.
+class PackExpansionExpr: public Expr {
+  Expr *PatternExpr;
+  SourceLoc DotsLoc;
+
+  PackExpansionExpr(Expr *patternExpr,
+                    SourceLoc dotsLoc,
+                    bool implicit, Type type)
+    : Expr(ExprKind::PackExpansion, implicit, type),
+      PatternExpr(patternExpr), DotsLoc(dotsLoc) {}
+
+public:
+  static PackExpansionExpr *create(ASTContext &ctx,
+                                   Expr *patternExpr,
+                                   SourceLoc dotsLoc,
+                                   bool implicit = false,
+                                   Type type = Type());
+
+  Expr *getPatternExpr() const { return PatternExpr; }
+
+  void setPatternExpr(Expr *patternExpr) {
+    PatternExpr = patternExpr;
+  }
+
+  SourceLoc getStartLoc() const {
+    return PatternExpr->getStartLoc();
+  }
+
+  SourceLoc getEndLoc() const {
+    return DotsLoc;
+  }
+
+  static bool classof(const Expr *E) {
+    return E->getKind() == ExprKind::PackExpansion;
+  }
+};
+
 /// SequenceExpr - A list of binary operations which has not yet been
 /// folded into a tree.  The operands all have even indices, while the
 /// subexpressions with odd indices are all (potentially overloaded)
@@ -4047,14 +4092,6 @@ public:
 ///   func f(x : @autoclosure () -> Int)
 ///   f(42)  // AutoclosureExpr convert from Int to ()->Int
 /// \endcode
-///
-///  They are also created when key path expressions are converted to function
-///  type, in which case, a pair of nested implicit closures are formed:
-/// \code
-///   { $kp$ in { $0[keyPath: $kp$] } }( \(E) )
-/// \endcode
-/// This is to ensure side effects of the key path expression (mainly indices in
-/// subscripts) are only evaluated once.
 class AutoClosureExpr : public AbstractClosureExpr {
   BraceStmt *Body;
 
@@ -4152,10 +4189,10 @@ class CaptureListExpr final : public Expr,
     private llvm::TrailingObjects<CaptureListExpr, CaptureListEntry> {
   friend TrailingObjects;
 
-  ClosureExpr *closureBody;
+  AbstractClosureExpr *closureBody;
 
   CaptureListExpr(ArrayRef<CaptureListEntry> captureList,
-                  ClosureExpr *closureBody)
+                  AbstractClosureExpr *closureBody)
     : Expr(ExprKind::CaptureList, /*Implicit=*/false, Type()),
       closureBody(closureBody) {
     Bits.CaptureListExpr.NumCaptures = captureList.size();
@@ -4166,16 +4203,16 @@ class CaptureListExpr final : public Expr,
 public:
   static CaptureListExpr *create(ASTContext &ctx,
                                  ArrayRef<CaptureListEntry> captureList,
-                                 ClosureExpr *closureBody);
+                                 AbstractClosureExpr *closureBody);
 
   ArrayRef<CaptureListEntry> getCaptureList() {
     return {getTrailingObjects<CaptureListEntry>(),
             Bits.CaptureListExpr.NumCaptures};
   }
-  ClosureExpr *getClosureBody() { return closureBody; }
-  const ClosureExpr *getClosureBody() const { return closureBody; }
+  AbstractClosureExpr *getClosureBody() { return closureBody; }
+  const AbstractClosureExpr *getClosureBody() const { return closureBody; }
 
-  void setClosureBody(ClosureExpr *body) { closureBody = body; }
+  void setClosureBody(AbstractClosureExpr *body) { closureBody = body; }
 
   /// This is a bit weird, but the capture list is lexically contained within
   /// the closure, so the ClosureExpr has the full source range.
@@ -5069,25 +5106,21 @@ public:
     return E->getKind() == ExprKind::RebindSelfInConstructor;
   }
 };
-  
-/// The conditional expression 'x ? y : z'.
-class IfExpr : public Expr {
+
+/// The ternary conditional expression 'x ? y : z'.
+class TernaryExpr : public Expr {
   Expr *CondExpr, *ThenExpr, *ElseExpr;
   SourceLoc QuestionLoc, ColonLoc;
 public:
-  IfExpr(Expr *CondExpr,
-         SourceLoc QuestionLoc, Expr *ThenExpr,
-         SourceLoc ColonLoc, Expr *ElseExpr,
-         Type Ty = Type())
-    : Expr(ExprKind::If, /*Implicit=*/false, Ty),
-      CondExpr(CondExpr), ThenExpr(ThenExpr), ElseExpr(ElseExpr),
-      QuestionLoc(QuestionLoc), ColonLoc(ColonLoc)
-  {}
-  
-  IfExpr(SourceLoc QuestionLoc, Expr *ThenExpr, SourceLoc ColonLoc)
-    : IfExpr(nullptr, QuestionLoc, ThenExpr, ColonLoc, nullptr)
-  {}
-  
+  TernaryExpr(Expr *CondExpr, SourceLoc QuestionLoc, Expr *ThenExpr,
+              SourceLoc ColonLoc, Expr *ElseExpr, Type Ty = Type())
+      : Expr(ExprKind::Ternary, /*Implicit=*/false, Ty), CondExpr(CondExpr),
+        ThenExpr(ThenExpr), ElseExpr(ElseExpr), QuestionLoc(QuestionLoc),
+        ColonLoc(ColonLoc) {}
+
+  TernaryExpr(SourceLoc QuestionLoc, Expr *ThenExpr, SourceLoc ColonLoc)
+      : TernaryExpr(nullptr, QuestionLoc, ThenExpr, ColonLoc, nullptr) {}
+
   SourceLoc getLoc() const { return QuestionLoc; }
   SourceLoc getStartLoc() const {
     return (isFolded() ? CondExpr->getStartLoc() : QuestionLoc);
@@ -5111,7 +5144,7 @@ public:
   bool isFolded() const { return CondExpr && ElseExpr; }
   
   static bool classof(const Expr *E) {
-    return E->getKind() == ExprKind::If;
+    return E->getKind() == ExprKind::Ternary;
   }
 };
 
@@ -5742,8 +5775,8 @@ private:
 public:
   /// Create a new parsed Swift key path expression.
   static KeyPathExpr *createParsed(ASTContext &ctx, SourceLoc backslashLoc,
-                                   Expr *parsedRoot, Expr *parsedPath,
-                                   bool hasLeadingDot);
+     Expr *parsedRoot, Expr *parsedPath,
+     bool hasLeadingDot);
 
   /// Create a new parsed #keyPath expression.
   static KeyPathExpr *createParsedPoundKeyPath(ASTContext &ctx,
@@ -5987,7 +6020,7 @@ public:
 };
 
 inline bool Expr::isInfixOperator() const {
-  return isa<BinaryExpr>(this) || isa<IfExpr>(this) ||
+  return isa<BinaryExpr>(this) || isa<TernaryExpr>(this) ||
          isa<AssignExpr>(this) || isa<ExplicitCastExpr>(this);
 }
 

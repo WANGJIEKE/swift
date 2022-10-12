@@ -1330,7 +1330,8 @@ void ASTMangler::appendType(Type type, GenericSignature sig,
     case TypeKind::Struct:
     case TypeKind::BoundGenericClass:
     case TypeKind::BoundGenericEnum:
-    case TypeKind::BoundGenericStruct: {
+    case TypeKind::BoundGenericStruct:
+    case TypeKind::BuiltinTuple: {
       GenericTypeDecl *Decl;
       if (auto typeAlias = dyn_cast<TypeAliasType>(type.getPointer()))
         Decl = typeAlias->getDecl();
@@ -2473,6 +2474,9 @@ void ASTMangler::appendAnyGenericType(const GenericTypeDecl *decl) {
     return;
   }
 
+  if (nominal && isa<BuiltinTupleDecl>(nominal))
+    return appendOperator("BT");
+
   appendContextOf(decl);
 
   // Always use Clang names for imported Clang declarations, unless they don't
@@ -2554,6 +2558,8 @@ void ASTMangler::appendAnyGenericType(const GenericTypeDecl *decl) {
     case DeclKind::Struct:
       appendOperator("V");
       break;
+    case DeclKind::BuiltinTuple:
+      llvm_unreachable("Not implemented");
     }
   }
 
@@ -2862,8 +2868,8 @@ void ASTMangler::appendRequirement(const Requirement &reqt,
   Type FirstTy = reqt.getFirstType()->getCanonicalType();
 
   switch (reqt.getKind()) {
-  case RequirementKind::SameCount:
-    llvm_unreachable("Same-count requirement not supported here");
+  case RequirementKind::SameShape:
+    llvm_unreachable("Same-shape requirement not supported here");
   case RequirementKind::Layout:
     break;
   case RequirementKind::Conformance: {
@@ -2885,8 +2891,8 @@ void ASTMangler::appendRequirement(const Requirement &reqt,
   if (auto *DT = FirstTy->getAs<DependentMemberType>()) {
     if (tryMangleTypeSubstitution(DT, sig)) {
       switch (reqt.getKind()) {
-        case RequirementKind::SameCount:
-          llvm_unreachable("Same-count requirement not supported here");
+        case RequirementKind::SameShape:
+          llvm_unreachable("Same-shape requirement not supported here");
         case RequirementKind::Conformance:
           return appendOperator("RQ");
         case RequirementKind::Layout:
@@ -2906,8 +2912,8 @@ void ASTMangler::appendRequirement(const Requirement &reqt,
     addTypeSubstitution(DT, sig);
     assert(gpBase);
     switch (reqt.getKind()) {
-      case RequirementKind::SameCount:
-        llvm_unreachable("Same-count requirement not supported here");
+      case RequirementKind::SameShape:
+        llvm_unreachable("Same-shape requirement not supported here");
       case RequirementKind::Conformance:
         return appendOpWithGenericParamIndex(isAssocTypeAtDepth ? "RP" : "Rp",
                                              gpBase, lhsBaseIsProtocolSelf);
@@ -2927,8 +2933,8 @@ void ASTMangler::appendRequirement(const Requirement &reqt,
   }
   GenericTypeParamType *gpBase = FirstTy->castTo<GenericTypeParamType>();
   switch (reqt.getKind()) {
-    case RequirementKind::SameCount:
-      llvm_unreachable("Same-count requirement not supported here");
+    case RequirementKind::SameShape:
+      llvm_unreachable("Same-shape requirement not supported here");
     case RequirementKind::Conformance:
       return appendOpWithGenericParamIndex("R", gpBase);
     case RequirementKind::Layout:
@@ -3488,8 +3494,8 @@ void ASTMangler::appendConcreteProtocolConformance(
   bool firstRequirement = true;
   for (const auto &conditionalReq : conformance->getConditionalRequirements()) {
     switch (conditionalReq.getKind()) {
-    case RequirementKind::SameCount:
-      llvm_unreachable("Same-count requirement not supported here");
+    case RequirementKind::SameShape:
+      llvm_unreachable("Same-shape requirement not supported here");
     case RequirementKind::Layout:
     case RequirementKind::SameType:
     case RequirementKind::Superclass:
@@ -3639,8 +3645,8 @@ void ASTMangler::appendConstrainedExistential(Type base, GenericSignature sig,
   bool firstRequirement = true;
   for (const auto &reqt : requirements) {
     switch (reqt.getKind()) {
-    case RequirementKind::SameCount:
-      llvm_unreachable("Same-count requirement not supported here");
+    case RequirementKind::SameShape:
+      llvm_unreachable("Same-shape requirement not supported here");
     case RequirementKind::Layout:
     case RequirementKind::Conformance:
     case RequirementKind::Superclass:

@@ -389,6 +389,7 @@ ConcreteDeclRef Expr::getReferencedDecl(bool stopAtParenExpr) const {
   PASS_THROUGH_REFERENCE(InOut, getSubExpr);
 
   NO_REFERENCE(VarargExpansion);
+  NO_REFERENCE(PackExpansion);
   NO_REFERENCE(DynamicType);
 
   PASS_THROUGH_REFERENCE(RebindSelfInConstructor, getSubExpr);
@@ -450,7 +451,7 @@ ConcreteDeclRef Expr::getReferencedDecl(bool stopAtParenExpr) const {
   NO_REFERENCE(Is);
 
   NO_REFERENCE(Arrow);
-  NO_REFERENCE(If);
+  NO_REFERENCE(Ternary);
   NO_REFERENCE(EnumIsCase);
   NO_REFERENCE(Assign);
   NO_REFERENCE(CodeCompletion);
@@ -484,25 +485,35 @@ forEachImmediateChildExpr(llvm::function_ref<Expr *(Expr *)> callback) {
     ChildWalker(llvm::function_ref<Expr *(Expr *)> callback, Expr *ThisNode)
       : callback(callback), ThisNode(ThisNode) {}
     
-    std::pair<bool, Expr *> walkToExprPre(Expr *E) override {
+    PreWalkResult<Expr *> walkToExprPre(Expr *E) override {
       // When looking at the current node, of course we want to enter it.  We
       // also don't want to enumerate it.
       if (E == ThisNode)
-        return { true, E };
+        return Action::Continue(E);
 
       // Otherwise we must be a child of our expression, enumerate it!
-      return { false, callback(E) };
+      E = callback(E);
+      if (!E)
+        return Action::Stop();
+
+      // We're only interested in the immediate children, so don't walk any
+      // further.
+      return Action::SkipChildren(E);
     }
     
-    std::pair<bool, Stmt *> walkToStmtPre(Stmt *S) override {
-      return { false, S };
+    PreWalkResult<Stmt *> walkToStmtPre(Stmt *S) override {
+      return Action::SkipChildren(S);
     }
 
-    std::pair<bool, Pattern*> walkToPatternPre(Pattern *P) override {
-      return { false, P };
+    PreWalkResult<Pattern *> walkToPatternPre(Pattern *P) override {
+      return Action::SkipChildren(P);
     }
-    bool walkToDeclPre(Decl *D) override { return false; }
-    bool walkToTypeReprPre(TypeRepr *T) override { return false; }
+    PreWalkAction walkToDeclPre(Decl *D) override {
+      return Action::SkipChildren();
+    }
+    PreWalkAction walkToTypeReprPre(TypeRepr *T) override {
+      return Action::SkipChildren();
+    }
   };
   
   this->walk(ChildWalker(callback, this));
@@ -518,20 +529,28 @@ void Expr::forEachChildExpr(llvm::function_ref<Expr *(Expr *)> callback) {
     ChildWalker(llvm::function_ref<Expr *(Expr *)> callback)
     : callback(callback) {}
 
-    std::pair<bool, Expr *> walkToExprPre(Expr *E) override {
+    PreWalkResult<Expr *> walkToExprPre(Expr *E) override {
       // Enumerate the node!
-      return { true, callback(E) };
+      E = callback(E);
+      if (!E)
+        return Action::Stop();
+
+      return Action::Continue(E);
     }
 
-    std::pair<bool, Stmt *> walkToStmtPre(Stmt *S) override {
-      return { false, S };
+    PreWalkResult<Stmt *> walkToStmtPre(Stmt *S) override {
+      return Action::SkipChildren(S);
     }
 
-    std::pair<bool, Pattern*> walkToPatternPre(Pattern *P) override {
-      return { false, P };
+    PreWalkResult<Pattern *> walkToPatternPre(Pattern *P) override {
+      return Action::SkipChildren(P);
     }
-    bool walkToDeclPre(Decl *D) override { return false; }
-    bool walkToTypeReprPre(TypeRepr *T) override { return false; }
+    PreWalkAction walkToDeclPre(Decl *D) override {
+      return Action::SkipChildren();
+    }
+    PreWalkAction walkToTypeReprPre(TypeRepr *T) override {
+      return Action::SkipChildren();
+    }
   };
 
   this->walk(ChildWalker(callback));
@@ -727,6 +746,7 @@ bool Expr::canAppendPostfixExpression(bool appendingPostfixOperator) const {
   case ExprKind::OpenExistential:
   case ExprKind::MakeTemporarilyEscapable:
   case ExprKind::VarargExpansion:
+  case ExprKind::PackExpansion:
     return false;
 
   case ExprKind::Call:
@@ -787,7 +807,7 @@ bool Expr::canAppendPostfixExpression(bool appendingPostfixOperator) const {
     return false;
 
   case ExprKind::Arrow:
-  case ExprKind::If:
+  case ExprKind::Ternary:
   case ExprKind::Assign:
   case ExprKind::UnresolvedPattern:
   case ExprKind::EditorPlaceholder:
@@ -823,11 +843,11 @@ llvm::DenseMap<Expr *, Expr *> Expr::getParentMap() {
     explicit RecordingTraversal(llvm::DenseMap<Expr *, Expr *> &parentMap)
       : ParentMap(parentMap) { }
 
-    std::pair<bool, Expr *> walkToExprPre(Expr *E) override {
+    PreWalkResult<Expr *> walkToExprPre(Expr *E) override {
       if (auto parent = Parent.getAsExpr())
         ParentMap[E] = parent;
 
-      return { true, E };
+      return Action::Continue(E);
     }
   };
 
@@ -900,6 +920,7 @@ bool Expr::isValidParentOfTypeExpr(Expr *typeExpr) const {
   case ExprKind::AutoClosure:
   case ExprKind::InOut:
   case ExprKind::VarargExpansion:
+  case ExprKind::PackExpansion:
   case ExprKind::DynamicType:
   case ExprKind::RebindSelfInConstructor:
   case ExprKind::OpaqueValue:
@@ -950,7 +971,7 @@ bool Expr::isValidParentOfTypeExpr(Expr *typeExpr) const {
   case ExprKind::Is:
   case ExprKind::Coerce:
   case ExprKind::Arrow:
-  case ExprKind::If:
+  case ExprKind::Ternary:
   case ExprKind::EnumIsCase:
   case ExprKind::Assign:
   case ExprKind::CodeCompletion:
@@ -1217,6 +1238,14 @@ VarargExpansionExpr *VarargExpansionExpr::createArrayExpansion(ASTContext &ctx, 
   return new (ctx) VarargExpansionExpr(AE, /*implicit*/ true, AE->getType());
 }
 
+PackExpansionExpr *
+PackExpansionExpr::create(ASTContext &ctx, Expr *patternExpr,
+                          SourceLoc dotsLoc, bool implicit,
+                          Type type) {
+  return new (ctx) PackExpansionExpr(patternExpr, dotsLoc,
+                                     implicit, type);
+}
+
 SequenceExpr *SequenceExpr::create(ASTContext &ctx, ArrayRef<Expr*> elements) {
   assert(elements.size() & 1 && "even number of elements in sequence");
   size_t bytes = totalSizeToAlloc<Expr *>(elements.size());
@@ -1284,7 +1313,7 @@ bool CaptureListEntry::isSimpleSelfCapture() const {
 
 CaptureListExpr *CaptureListExpr::create(ASTContext &ctx,
                                          ArrayRef<CaptureListEntry> captureList,
-                                         ClosureExpr *closureBody) {
+                                         AbstractClosureExpr *closureBody) {
   auto size = totalSizeToAlloc<CaptureListEntry>(captureList.size());
   auto mem = ctx.Allocate(size, alignof(CaptureListExpr));
   auto *expr = ::new(mem) CaptureListExpr(captureList, closureBody);
@@ -2289,7 +2318,7 @@ KeyPathExpr *KeyPathExpr::createImplicit(ASTContext &ctx,
                                          Expr *parsedRoot, Expr *parsedPath,
                                          bool hasLeadingDot) {
   return new (ctx) KeyPathExpr(backslashLoc, parsedRoot, parsedPath,
-                               hasLeadingDot, /*isImplicit*/ true);
+           hasLeadingDot, /*isImplicit*/ true);
 }
 
 void
